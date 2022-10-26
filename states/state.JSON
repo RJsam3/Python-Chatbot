@@ -1,0 +1,1 @@
+{"template_commands": {"boop": "{message.user} boops {message.text_args[0]}'s snoot!", "so": "Check out {message.text_args[0]}'s stream! Here's a link: https://www.twitch.tv/{message.text_args[0]}", "pizza": "{message.user} will be getting a pizza in the mail in a few years.", "headpat": "{message.user} gives {message.text_args[0]} headpats!"}}
