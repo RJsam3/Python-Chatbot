@@ -11,22 +11,24 @@ from streamer import Streamer
 import os
 import asyncio
 import game
-import threading
 import random
 
+#Chat message namedTuple used in the parse message functionality. Makes it easy to identify what parts of the message are needed for chat commands.
 Message = namedtuple('Message', 'prefix user channel irc_command irc_args text text_command text_args', )
             
+#This function removes the command prefix from a string.
 def remove_prefix(string, prefix):
     if not string.startswith(prefix):
         return string
     else:
         return string[len(prefix):]
 
-#implement separate command file
 
 
 
+#The main bot class. Most functionality happens with this class.
 class Bot:
+    #Sets necessary variables for various bot and command functions.
     def __init__(self):
         self.bot_logger = bot_function_logger
         self.command_logger = command_logger
@@ -34,8 +36,8 @@ class Bot:
         self.irc_server = 'irc.chat.twitch.tv'
         self.irc_port = 6697
         self.oauth_token = config.OAUTH_TOKEN
-        self.username = 'nivvlesbott'
-        self.channels = ['nivecgos']
+        self.username = config.USERNAME
+        self.channels = [config.CHANNEL]
         self.streamer = Streamer(self.channels[0])
         self.users = []
         self.channel_viewers = []
@@ -71,6 +73,7 @@ class Bot:
         }
         self.bot_logger.info('Initialized.')
     
+    #Ensures the streamer has the required schema in a .JSON file with their twitch name.
     def ensure_state_schema(self):
         self.bot_logger.info('Ensuring schema is set.')
         is_dirty = False
@@ -87,6 +90,7 @@ class Bot:
         self.bot_logger.debug(f'{is_dirty}')
         return is_dirty
 
+    #Reads the .JSON file for the streamer. Creates it if it does not exist.
     def read_state(self):
         if not os.path.exists(self.streamer.state_filename):
             with open(self.streamer.state_filename, 'w') as file:
@@ -99,12 +103,13 @@ class Bot:
             self.bot_logger.warning('Schema improperly set. Overwriting.')
             self.write_state()
         
-
+    #Rewrites the streamers .JSON file if it does not match the set schema.
     def write_state(self):
         with open(self.streamer.state_filename, 'w') as file:
             json.dump(self.streamer.state, file)
             self.bot_logger.info('Schema updated.')
 
+    #If the parsed message is a template command, this function attempts to send the appropriate response.
     def handle_template_command(self, message, text_command, template):
         try:
             text = template.format(**{'message': message})
@@ -118,7 +123,9 @@ class Bot:
             self.command_logger.error(e)
             self.command_logger.info(f'{message.text_command} from {message.user} failed.')
 
+    #The main message handling function, handles JOIN, PING, PART, and PRIVMSG messages.
     async def handle_message(self, received_msg):
+        #Handles empty messages. This happens a lot.
         if len(received_msg) == 0:
             self.bot_logger.warning('Received empty message.')
             return
@@ -126,19 +133,26 @@ class Bot:
         self.bot_logger.info(f'Received message: {received_msg}')
         self.bot_logger.debug(f'Named Tuple: {message}')
 
+        #Handles PING messages. Response with a PONG message.
         if message.irc_command == 'PING':
             self.send_command('PONG :tmi.twitch.tv')
             self.bot_logger.info('Received PING. Replied PONG.')
         
+        #Handles JOIN messages whenever they appear. These do not appear often enough for this feature to be fully functional, and is essentially turned off after 1k viewers.
         if message.irc_command == 'JOIN':
             self.bot_logger.info('JOIN message received.')
             self.bot_logger.debug(f'Viewer List: {self.channel_viewers}')
+            #The bot ignores JOIN messages from the streamer.
             if message.user == message.channel:
                 self.bot_logger.debug(f'{message.user} is the streamer. Ignoring.')
                 return
+
+            #The bot ignores JOIN messages from itself.
             elif message.user == self.username:
                 self.bot_logger.debug(f'{message.user} is me. Ignoring.')
                 return
+
+            #The bot checks to see if the viewer is already in its database, and adds them if not. It then notifies them and tells them how to opt out.
             if message.user not in self.users:
                 self.bot_logger.info(f'{message.user} is new. Adding to database.')
                 self.create_user_views(message)
@@ -149,48 +163,63 @@ class Bot:
                 self.bot_logger.debug(f'{message.user} appended to user list.')
                 self.send_privmsg(message.channel, f"Welcome to the stream, {message.user}! I am a bot that is currently in testing. If you would like help with my features, please use {self.command_prefix}help. If you would like to opt out of testing features that require me to remember your username, please use the command {self.command_prefix}optout")
                 self.bot_logger.info(f'Join for {message.user} processed.')
+
+            #The bot checks if they are listed as a viewer for this channel, and creates the relationship and adds them to its list if they are not.
             if message.user not in self.channel_viewers:
                 self.bot_logger.debug(f'Runninng create_user_views with argument: {message}')
                 self.create_views(message)
                 self.channel_viewers.append(message.user)
                 self.bot_logger.debug(f'{message.user} appended to viewer list.')
+
+            #If all of the above conditions are false, the viewer is not new, and the bot welcomes them to the chat.
             else:
                 self.bot_logger.info(f'{message.user} is in user and viewer list.')
                 self.send_privmsg(message.channel, f"Welcome back, {message.user}! I'm so glad to see you again!")
                 self.bot_logger.info(f'Welcome back sent to: {message.user}')
+
+            #The bot then checks if the viewer is in the dictionary of Viewer object indexes. 
+            #If not, it creates a Viewer object, adds it to the list of Viewer objects, and assigns their username as a key with the value being their index in the list of objects.
             if message.user not in self.viewer_features_dictionary.keys():
                 self.bot_logger.info(f'Creating viewer object for {message.user}.')
                 viewer = Viewer(message.user, message.channel)
                 self.viewer_object_list.append(viewer)
                 viewer_dictionary_count = len(self.viewer_object_list) - 1
                 self.viewer_features_dictionary[self.viewer_object_list[viewer_dictionary_count].username] = viewer_dictionary_count
-                
+
+            #If the viewer is already in the dictionary, it sets their status as online.
             else:
                 self.bot_logger.info(f'{message.user} already has a viewer object.')
                 self.viewer_object_list[self.viewer_features_dictionary[message.user]].update_is_online()
 
-
+        #Handles PART messages when they appear. These do not appear often enough for this feature to be fully functional, and is essentially turned off after 1k viewers.
         if message.irc_command == 'PART':
             self.bot_logger.info(f'PART message received from: {message.user}')
             self.viewer_object_list[self.viewer_features_dictionary[message.user]].update_is_online()
             self.send_privmsg(message.channel, f'{message.user} has died. F.')
-
+        
+        #Handles PRIVMSG messages when they appear. This is the most common message type.
         if message.irc_command == 'PRIVMSG':
             self.bot_logger.info(f'Received PRIVMSG from: {message.user}')
+
+            #If the text_command portion of the message is a custom command, call the apropriate custom command function.
             if message.text_command in self.custom_commands:
                 self.bot_logger.info('Custom command received.')
+
+                #If the custom command is a query command, increase query count before running the command.
                 if message.text_command.startswith('query_'):
                     self.bot_logger.info('Query command recognized.')
                     self.QueryDriver.Run_increase_query_count(message.user)
                     self.bot_logger.info('Query command processed.')
                 self.custom_commands[message.text_command](message)
                 self.bot_logger.info('Custom command processed.')
-
+            
+            #if the command is a template command, call the handle template command function.
             elif message.text_command in self.streamer.state['template_commands']:
                 self.bot_logger.info('Template command recognized.')
                 self.handle_template_command(message, message.text_command, self.streamer.state['template_commands'][message.text_command])
                 self.bot_logger.info('Template Command processed.')
         
+    #Removes unneeded twitch info from the chat message.
     def get_user_from_prefix(self, prefix):
         domain = prefix.split('!')[0]
         if domain.endswith('.tmi.twitch.tv'):
@@ -198,6 +227,7 @@ class Bot:
         if '.tmi.twitch.tv' not in domain:
             return domain
 
+    #Parses a message into the Message namedTuple.
     def parse_message(self, received_msg):
         parts = received_msg.split(' ')
         prefix = None
@@ -244,6 +274,7 @@ class Bot:
         )
         return message
 
+    #The main loop for chat messages. assigns each message to a task and handles the tasks conncurrently if htere are tasks in the list.
     async def loop_for_messages(self):
         tasks = []
         while True:
@@ -257,7 +288,8 @@ class Bot:
                 tasks = []
             else: 
                 pass
-        
+    
+    #Connects to the twitch chat.
     def connect(self):
         self.bot_logger.info('Connnecting to chat(s)')
         self.irc = ssl.wrap_socket(socket.socket())
@@ -273,17 +305,19 @@ class Bot:
         self.bot_logger.info(f'Joined chats for {self.channels}')
         asyncio.run(self.loop_for_messages())
 
-
+    #Sends a command to the chat and prints it to the console.
     def send_command(self, command):
         if 'PASS' not in command:
             print(f'<{command}')
         self.irc.send((command + '\r\n').encode())
 
+    #Sends a PRIVMSG to the chat.
     def send_privmsg(self, channel, text):
         self.send_command(f'PRIVMSG #{channel} :{text}')
         if channel != 'nivecgos':
                 sleep(3)
 
+    #Sets the Neo4j Driver.
     def init_driver(self):
         self.bot_logger.info('Innitializing QueryDriver')
         try:
@@ -293,17 +327,21 @@ class Bot:
             self.bot_logger.critical('Failed tto initialize Query Driver.')
             self.bot_logger.error(e)
     
+    #Sets up the streamer's template commands if they do not have a .JSON.
     def init_state(self):
         self.read_state()
 
+    #Gets the list of all known viewers from the database.
     def get_channel_viewers(self):
         self.channel_viewers = self.QueryDriver.Run_get_viewers(self.channels[0])
         print(self.channel_viewers)
 
     #Hard coded commands that are NOT Query Commands
 
+    #The help command. Heavily bloated.
     def command_help(self, message):
         self.command_logger.info(f'Command received from: {message.user}. Command: {message.text_command}')
+        #The help dictionnary, contains help for all custom commands.
         command_help = {
             'optout': 'Tells me not to remember you. This will remove your ability to use database commands. You will need to do this once per stream (pending persistent list)',
             'querycommands': 'Enter this command to get a list of all commands. This command does not increase Query Count.',
@@ -329,49 +367,76 @@ class Bot:
             'removepoints': f'This command can only be used by the streamer. it removes points from a viewer. Syntax: {self.streamer.get_command_prefix()}removepoints <viewer> <{self.streamer.get_points_name()} amount>',
             'donate': f'This command takes {self.streamer.get_points_name()} from one viewer, and gives them to another. It cannot be used to give more {self.streamer.get_points_name()} than you have. All {self.streamer.get_points_name()} given with this command should be considered gone for good. Syntax: {self.streamer.get_command_prefix()}donate <viewer> <{self.streamer.get_points_name()} amount>'
         }
+        #If the user does not ask for a command, sends a  general help message.
         if message.text_args == []:
             self.send_privmsg(message.channel, f'Hello, {message.user}. I am a bot developed by Nivecgos that is currently in testing. You may type {self.streamer.command_prefix}querycommands for a list of custom made queries. You may type {self.streamer.command_prefix}help <command name> if you need help with a query command.')
             self.command_logger.info('Help response sent.')
             self.command_logger.debug('No argument given')
+
+        #If the correct amount of arguments is given, send the help for that command.
         elif len(message.text_args) == 1:
             command_to_help = message.text_args[0]
+
+            #If the command is not in help, tell the user.
             if command_to_help not in command_help:
                 self.send_privmsg(message.channel, f'This command does not exist. If this command is a template command, please be aware that I do not currently provide help for template commands.')
                 self.command_logger.critical(f'{command_to_help} not in help dictionary. Response sent.')
+
+            #if the command is in help, send the help message.
             elif command_to_help in command_help:
+
+                #If command can only be used by the streamer, do not send command help.
                 if command_to_help.startswith('This command can only be used by the streamer.') and message.user != message.channel:
                     self.send_privmsg(message.channel, f'Sorry, {message.user}, but you cannot use this command, so telling you how to use it does not make sense. If you would like to see how this command works, please ask Nivvecgos to run me in your channel, or consult the documentation.')
                     return
                 self.send_privmsg(message.channel, command_help[command_to_help])
                 self.command_logger.info(f'Sent command help for {command_to_help}')
+
+        #If there are too many arguments, tell the user.
         elif len(message.text_args) > 1:
             self.send_privmsg(message.channel, "I can only explain one command at a time. Please try again with just one command.")
             self.command_logger.error(f'Length of text_args is greater than one. Response sent.')
 
+    #Sets a new command prefix for the streamer.
     def set_command_prefix(self, message):
         self.command_logger.info(f'Command received from: {message.user}. Command: {message.text_command}')
+
+        #If user is not the streamer, do not set the new prefix.
         if message.user != self.streamer.username:
             self.send_privmsg(message.channel, f"I'm sorry, {message.user}, but you must be {self.streamer.get_username()} to use this command.")
             self.command_logger.warning(f'{message.user} tried to change command prefix.')
             return
+        
+        #If the number of arguments is incorrect, do not set the new prefix.
         elif message.text_args == [] or len(message.text_args) > 1:
             self.send_privmsg(message.channel, "This command requires one single-character argument")
             self.command_logger.warning(f'text_args length is greater than 1. args: {message.text_args}')
+
+        ##If above are false, set the new prefix.
         else:
             self.streamer.set_command_prefix(message.text_args[0])
             self.send_privmsg(message.channel, f'I have set your new command prefix to "{self.streamer.command_prefix}"')
             self.command_logger.info(f'Command prefix changed to {self.streamer.get_command_prefix()}.')
             
+
+    #Adds a new template command to the streamer.JSON
     def add_command(self, message, force=False):
         self.command_logger.info(f'Command received from: {message.user}. Command: {message.text_command}')
+
+        #If user is not the streamer, do nnot add the command.
         if message.user != self.streamer.username:
             self.send_privmsg(message.channel, f"I'm sorry, {message.user}, but you must be {message.channel} to use this command.")
             self.command_logger.warning(f'{message.user} tried to add a command.')
             return
+
+        #If there are not enough arguments, the command cannot be set.
         if len(message.text_args) < 2:
             self.send_privmsg(message.channel, f'This command requires 2 arguments: The command Name, and the command Template')
             self.command_logger.error(f'Text_args length less than 2. Text_args: {message.text_args}')
             return
+
+
+        #If this command is called to replace or edit a custom command, tell the user.
         if message.text_args[1] in self.custom_commands:
             self.send_privmsg(message.channel, "You cannot add a command that shares a name with a non-template command.")
             self.command_logger.warning(f'{message.text_args[1]} is already a custom command.')
@@ -379,6 +444,8 @@ class Bot:
         self.command_logger.debug(f'Command Name set: {command_name}')
         template = ' '.join(message.text_args[1:])
         self.command_logger.debug(f'Template set: {template}')
+
+        #If command is called to edit or replace a template command, tell the user to use the correct command.
         if command_name in self.state['template_commands'] and force is not True:
             self.send_privmsg(message.channel, f"This command already exists. Use {self.streamer.command_prefix}edit_command if you would like to change it.")
             self.command_logger.warning(f'{command_name} is already a template command.')
@@ -387,30 +454,42 @@ class Bot:
         self.command_logger.info(f'{command_name} added to template commands.')
         self.send_privmsg(message.channel, f'{command_name} added.')
 
+    #Edits an existing template command.
     def edit_command(self, message):
         self.command_logger.info(f'Command received from: {message.user}. Command: {message.text_command}')
+        
+        #If the user is not the streamer, do not change the command.
         if message.user != message.channel:
             self.send_privmsg(message.channel, f"I'm sorry, {message.user}, but you must be  {message.channel} to use this command.")
             self.command_logger.warning(f'{message.user} tried to edit a command.')
             return
         self.add_command(message, force=True)
 
+    #Deletes a template command from the streamer.JSON.
     def delete_command(self, message):
         self.command_logger.info(f'Command received from: {message.user}. Command: {message.text_command}')
+
+        #If the user is not the streamer, do not delete the command.
         if message.user != message.channel:
             self.send_privmsg(message.channel, f"I'm sorry, {message.user}, but you must be  {message.channel} to use this command.")
             self.command_logger.warning(f'{message.user} tried to delete a command.')
             return
+        
+        #If there are no arguments, tell the user.
         if len(message.text_args) < 1:
             self.send_privmsg(message.channel, "This command requires one argument")
             self.command_logger.error(f'Text_args length is 0.')
             return
         command_names = [remove_prefix(command, self.streamer.command_prefix) for command in message.text_args]
         self.command_logger.debug(f'Commands to remove: {command_names}')
+
+        #If any arguments given are not a valid template command, tell the user.
         if not all([command_name in self.streamer.state['template_commands'] for command_name in command_names]):
             self.send_privmsg('One of the commands does not exist.')
             self.command_logger.warning('One of the  ')
             return
+
+        #Delete the commands if all arguments given are template commands.
         for command_name in command_names:
             del self.streamer.state['template_commands'][command_name]
             self.command_logger.info(f'Deleted {command_name}.')
@@ -419,12 +498,14 @@ class Bot:
         self.send_privmsg(message.channel, f'Commands deleted: {command_names}')
 
    
-    #NEO4J QUERY COMMANDS
+    #NEO4J QUERY COMMANDS. THESE COMMANDS REQUIRE A NEO$J DATABASE TO BE CONNECTED.
+
     #Removes a user from the database.
     def remove_user(self, message):
         self.command_logger.info(f'Query Command received from: {message.user}. Command: {message.text_command}')
         try:
             query = self.QueryDriver.Run_remove_user(message.user)
+            #If the query fails, raise  an error.
             if query == False:
                 raise ValueError('Run function returned false.')
             self.send_privmsg(message.channel, f'Okay, {message.user}, I will not remember you. I will still use your username for template commands, as those do not require memory.')
@@ -452,6 +533,7 @@ class Bot:
         self.command_logger.info(f'Getting users...')
         try:
             users = self.QueryDriver.Run_all_user()
+            #If the query fails, raise an error.
             if users == False:
                 raise ValueError('Run function returned false.')
             self.command_logger.info('Users retrieved.')
@@ -460,15 +542,17 @@ class Bot:
             self.command_logger.error(e)
             self.command_logger.info('Failed to retrieve users.')
 
-    #adds the user who sent the command to the database
+    #adds the user who sent the command to the database. Should be used by the streamer during intial bot set up.
     def set_add_user(self, message):
         self.command_logger.info(f'Query Command received from: {message.user}. Command: {message.text_command}')
+        #If the user is not the streamer, do not run the query.
         if  message.channel != message.user:
             self.send_privmsg(message.channel, "Sorry, but you cannot run this command unless you are the streamer.")
             self.command_logger.warning(f'{message.user} tried to create a node.')
         try:
             self.send_privmsg(message.channel, f"Okay, {message.user}, I will remember you.")
             query = self.QueryDriver.Run_add_user(message.user)
+            #If the query fails, raise an error.
             if query == False:
                 raise ValueError('Run Function returned false.')
         except Exception as e:
@@ -479,24 +563,29 @@ class Bot:
     #adds a friendship between the user who sent the argument, and the specified user.
     def set_friendship(self, message):
         self.command_logger.info(f'Query Command received from: {message.user}. Command: {message.text_command}')
+        #If no friend is specified, tell the user.
         if message.text_args == []:
             self.send_privmsg(message.channel,"Please include the username of the person you wish to be friends with.")
             self.command_logger.warning('Text_args list is empty.')
             return
         else:
             try:
+                #If the user has a valid Viewer object, create the friendship.
                 if message.user in self.viewer_features_dictionary.keys:
                     viewer = self.viewer_object_list[self.viewer_features_dictionary[message.user]]
                     new_friend = message.text_args[0]
                     self.command_logger.debug(f'New Friend: {new_friend}')
                     query = viewer.update_friends_list(new_friend)
+                    #If the query fails, raise an error.
                     if query == False:
                         raise ValueError('Viewer Function returned false.')
-                elif message.user  == message.channel:
+                #If the user is the streamer, create the friendship.
+                elif message.user == message.channel:
                     streamer = self.streamer
                     new_friend = message.text_args[0]
                     self.command_logger.debug(f'New Friend: {new_friend}')
                     query = streamer.update_friends_list(self.streamer.username, new_friend)
+                    #If the query fails, raise an error.
                     if query == False:
                         raise ValueError('Streamer Function returned false.')
                 self.send_privmsg(message.channel, f'Your friendship with {new_friend} will be remembered.')
@@ -509,16 +598,20 @@ class Bot:
     def get_friends(self, message):
         self.command_logger.info(f'Query Command received from: {message.user}. Command: {message.text_command}')
         try:
+            #If the user has a valid viewer oject, get their friends list.
             if message.user in self.viewer_features_dictionary.keys():
                 viewer = self.viewer_object_list[self.viewer_features_dictionary[message.user]]
                 friends = viewer.get_friends_list()
+                #If the method fails, raise an error.
                 if friends == False:
                     raise ValueError('Viewer function returned false')
                 friends_string = ', '.join(friends)
                 self.command_logger.debug(f'Friends string: {friends_string}')
+            #If the user is the streamer, use the method in the Streamer class instead.
             elif message.user  == message.channel:
                 streamer = self.streamer
                 friends = streamer.get_friends_list()
+                #If the method fails, raise an error.
                 if friends == False:
                     raise ValueError('Streamer Function returned false.')
                 friends_string = ', '.join(friends)
@@ -532,35 +625,47 @@ class Bot:
     def get_stats(self, message):
         self.command_logger.info(f'Query Command received from: {message.user}. Command: {message.text_command}')
         try:
+            #If the user specifies a target, get the target's stats.
             if message.text_args:
+                #if the target has a valid Viewer Object, get their stats.
                 if message.text_args[0] in self.viewer_features_dictionary.keys():
                     viewer = self.viewer_object_list[self.viewer_features_dictionary[message.text_args[0]]]
                     stats = viewer.get_stats()
+                    #If the method fails, raise an error.
                     if stats == False:
                         raise ValueError('Viewer function returned false.')
                     self.send_privmsg(message.channel, f"{viewer.username}'s stats are:")
                     self.command_logger.info(f"{viewer.username}'s stats are {stats}")
+                    #Send a message for each stat with the stat name and value.
                     for stat, value in stats.items():
                         self.send_privmsg(message.channel, f'{stat}: {value}')
+                #If the target does not have a Viewer Object, raise an error.
                 else:
-                    raise ValueError('User object does not exist. Please check syntax or spelling.')
+                    raise ValueError('Viewer object does not exist. Please check syntax or spelling.')
+            
+            #If no target is specified, get the user's stats.
             else:
+                #If the user has a Viewer object, get their stats.
                 if message.user in self.viewer_features_dictionary.keys():
                     viewer = self.viewer_object_list[self.viewer_features_dictionary[message.user]]
                     stats = viewer.get_stats()
+                    #If the method fails, raise an error.
                     if stats == False:
                         raise ValueError('Viewer function returned false.')
                     self.command_logger.info(f"{viewer.username}'s stats are {stats}")
                     self.send_privmsg(message.channel, f"{viewer.username}, your stats are:")
                     for stat, value in stats.items():
                         self.send_privmsg(message.channel, f'{stat}: {value}')
+                #If the user is the streamer, use the Streamer class method instead.
                 elif message.user == message.channel:
                     streamer = self.streamer
                     stats = streamer.get_stats()
+                    #If the method fails, raise an error.
                     if stats == False:
                         raise ValueError('Streamer function returned false')
                     self.command_logger.info(f"{streamer.username}'s stats are {stats}")
                     self.send_privmsg(message.channel, f"{streamer.username}, your stats are:")
+                    #Send a message for each stat with the stat name and value.
                     for stat, value in stats.items():
                         self.send_privmsg(message.channel, f'{stat}: {value}')
         except Exception as e:
@@ -574,6 +679,7 @@ class Bot:
         self.send_privmsg(message.channel, "Okay, I am getting the current Genres.")
         try:
             genres = self.QueryDriver.Run_get_genres()
+            #If the query fails, raise an error.
             if genres == False:
                 raise ValueError('Run function returned false.')
             genre_string = ', '.join(genres)
@@ -587,21 +693,27 @@ class Bot:
     #Sets a :LIKES_GENRE relationship between the user running the command and the specified genre
     def set_likes_genre(self, message):
         self.command_logger.info(f'Query Command received from: {message.user}. Command: {message.text_command}')
+        #If there is not genre specified, tell the user.
         if message.text_args == []:
             self.send_privmsg(message.channel, f"You must specify a genre from the list of genres. You can see a list of genres I know by using the {self.command_prefix}query_get_genres command.")
             self.command_logger.warning('Text args list lenngth is 0.')
+        #If the genre is specifed, set the :LIKES relationship to that genre.
         else:
             try:
+                #If the user has a Viewer object, set the :LIKES_GENRE relationship to that genre.
                 if message.user in self.viewer_features_dictionary.keys():
                     viewer = self.viewer_object_list[self.viewer_features_dictionary[message.user]]
                     genre = message.text_args[0]
                     query = viewer.update_liked_genres(genre)
+                    #If the method fails, raise an error.
                     if query == False:
                         raise ValueError('Viewer function returned false.')
+                #If the user is the streamer, use the Streamer class method.
                 elif message.user == message.channel:
                     streamer = self.streamer
                     genre = message.text_args[0]
                     query = streamer.update_liked_genres(genre)
+                    #If the method fails, raise an error.
                     if query == False:
                         raise ValueError('Streamer function returned false.')
                 self.send_privmsg(message.channel, f'I will remember that you like {genre}, {message.user}.')
@@ -614,30 +726,40 @@ class Bot:
     def get_liked_genres(self, message):
         self.command_logger.info(f'Query Command received from: {message.user}. Command: {message.text_command}')
         try:
+            #If no target is specified, get the user's liked genres.
             if message.text_args == []:
+                #If the target has a Viewer object, get the user's liked genres.
                 if message.user in self.viewer_features_dictionary.keys():
                     viewer = self.viewer_object_list[self.viewer_features_dictionary[message.user]]
                     liked_genres = viewer.get_liked_genres()
+                    #If the method fails, raise an error.
                     if liked_genres ==  False:
                         raise ValueError('Viewer function returned false.')
+                #If the user is the streamer, use the Streamer class method.
                 elif message.user == message.channel:
                     streamer = self.streamer
                     liked_genres = streamer.get_liked_genres()
+                    #If the method fails, raise an error.
                     if liked_genres ==  False:
                         raise ValueError('Viewer function returned false.')
                 genre_string = ', '.join(liked_genres)
                 self.command_logger.debug(genre_string)
-                self.send_privmsg(message.channel, f"You like the following genres: {genre_string}")    
+                self.send_privmsg(message.channel, f"You like the following genres: {genre_string}")
+            #If a target is specified, get their likd genres.
             elif len(message.text_args) >= 1:
+                #If the target has a Viewer object, get their liked genres.
                 if message.text_args[0] in self.viewer_features_dictionary.keys():
                     viewer = self.viewer_object_list[self.viewer_features_dictionary[message.text_args[0]]]
                     liked_genres = viewer.get_liked_genres()
-                    if liked_genres ==  False:
+                    #If the method fails, raise an error.
+                    if liked_genres == False:
                         raise ValueError('Run function returned false.')
-                elif message.text_args[0] == message.channel:
+                #If the target is the streamer, use the Streamer class method.
+                elif message.text_args[1] == message.channel:
                     streamer = self.streamer
                     liked_genres = streamer.get_liked_genres()
-                    if liked_genres ==  False:
+                    #If the method fails, raise an error.
+                    if liked_genres == False:
                         raise ValueError('Run function returned false.')
                 genre_string = ', '.join(liked_genres)
                 self.command_logger.debug(genre_string)
@@ -654,6 +776,7 @@ class Bot:
         username = message.user
         try:
             query = self.QueryDriver.Run_create_user_views(username, channel)
+            #If the query fails, raise an error.
             if query == False:
                 raise ValueError('Run function returned false.')
         except Exception as e:
@@ -668,8 +791,10 @@ class Bot:
         username = message.user
         try:
             query = self.QueryDriver.Run_create_views(username, channel)
+            #If the query fails, raise an error.
             if query == False:
                 raise ValueError('Run  function returned false.')
+            #If the message is not a JOIN message, acknowledge the user.
             if message.irc_command != 'JOIN':
                 self.send_privmsg(message.channel, f'Okay,  {message.user}, I will remember that you watch {message.channel}.')
         except Exception as e:
@@ -681,15 +806,19 @@ class Bot:
     def get_viewers(self, message=None):
         self.command_logger.info(f'Query Command received from: {message.user}. Command: {message.text_command}')
         try:
+            #If the user is not the streamer, do not get the viewer list.
             if message.channel != message.user:
                 self.send_privmsg(message.channel, f'Sorry, {message.user}, but you must be the streamer to run this command.')
                 self.command_logger.warning(f'{message.user} tried to get the viewer list.')
                 return
+            #If the command was not sent, but the function is called, get the viewers for the channel.
             elif message == None:
                 viewers = self.QueryDriver.Run_get_viewers(self.channels[0])
                 return viewers
+            #If the above are false, get the viewer list.
             else:
                 viewers = ', '.join(self.QueryDriver.Run_get_viewers(message.channel))
+                #If the query fails, return false.
                 if viewers == False:
                     raise ValueError('Run function returned false.')
                 self.command_logger.debug(f'{viewers}')
@@ -703,6 +832,7 @@ class Bot:
     #Runs a read only query that retrieves the genre that most of the streamer's viewers have a :LIKES_GENRE relationship to.
     def suggest_genres(self, message):
         self.command_logger.info(f'Query Command received from: {message.user}. Command: {message.text_command}')
+        #If the user is not the streamer, do not get the suggested genre.
         if message.channel != message.user:
             self.send_privmsg(message.channel, f'Sorry, {message.user},  but only the streamer can run with this command.')
             self.command_logger.warning(f'{message.user} tried to get genre suggestions.')
@@ -710,16 +840,22 @@ class Bot:
         channel = message.channel
         try:
             genres = self.QueryDriver.Run_get_viewer_liked_genres(channel)
+            #If the query fails, raise an error.
             if genres ==  False:
                 raise ValueError('Run function returned false.')
             self.command_logger.debug(f'{genres}')
             best_genre = []
+            #Find the best genre as returned from the query and post it
             for genre, amount in genres.items():
+                #If there is not a current best genre, set the best genre to the current genre.
                 if best_genre == []:
                     best_genre = [genre, amount]
+                #If the above is false, do not set best genre yet.
                 else:
+                    #If the current genre is better than the current best genre, set the best genre to the current genre.
                     if genres[genre] > best_genre[1]:
                         best_genre = [genre, amount]
+                    #If the current genre  is the best genre, pass.
                     elif genres[genre] == best_genre:
                         pass
             self.command_logger.debug(f'{best_genre}')
@@ -729,14 +865,16 @@ class Bot:
             self.command_logger.info(f'{message.text_command} from {message.user} failed.')
             self.send_privmsg(message.channel, f'{message.text_command} failed. Please check syntax and try again.')
 
-    #Gets the query_count leader for the specified channel.
+    #Gets the query_count leader for the channel.
     def get_query_count_leader(self, message):
         self.command_logger.info(f'Query Command received from: {message.user}. Command: {message.text_command}')
         channel = message.channel
         try:
             count_leader = self.QueryDriver.Run_get_query_count_leader(channel)
+            #If the  query fails, raise an error.
             if count_leader == False:
                 raise ValueError('Run function returned false.')
+            #Get the count leader values that were returnend from the query and post them in the chat.
             for key, value in count_leader.items():
                 count_name=key
                 count_number=value
@@ -751,6 +889,7 @@ class Bot:
     def add_points(self, message):
         self.command_logger.info(f'Query Command received from: {message.user}. Command: {message.text_command}')
         try:
+            #If the user is not the streamer, do not add points.
             if message.user != self.streamer.get_username():
                 self.send_privmsg(f'Sorry, {message.user}, only the streamer can run this command. Please try the "donate" command instead.')
                 self.command_logger.warning(f'{message.user} tried to add points.')
@@ -768,6 +907,7 @@ class Bot:
     def remove_points(self, message):
         self.command_logger.info(f'Query Command received from: {message.user}. Command: {message.text_command}')
         try:
+            #If the user is not the streamer, do not remove points.
             if message.user != self.streamer.get_username():
                 self.send_privmsg(message.channel, f'Sorry, {message.user}, only the streamer can run this command.')
                 self.command_logger.warning(f'{message.user} tried to remove someones points.')
@@ -781,10 +921,11 @@ class Bot:
             self.command_logger.info(f'{message.text_command} from {message.user} failed.')
             self.send_privmsg(message.channel, f'{message.text_command} failed. Please check syntax and try again.')
 
-    #Donates  points from user 1 to user 2
+    #Donates points from the user to the target.
     def donate_points(self, message):
         self.command_logger.info(f'Query Command received from: {message.user}. Command: {message.text_command}')
         try:
+            #If the user is the streamer, do not donate points.
             if message.user == self.streamer.get_username:
                 self.send_privmsg(message.channel, f'Sorry, {message.user}, but you cannot donatte points in your own chat. Please try "addpoints" instead.')
                 self.command_logger.warning('The streamer tried to donate points in their own chat.')
@@ -792,6 +933,7 @@ class Bot:
             viewer1 = self.viewer_object_list[self.viewer_features_dictionary[message.user]]
             viewer2 = self.viewer_object_list[self.viewer_features_dictionary[message.text_args[0]]]
             points = message.text_args[1]
+            #If the user does not have enough points, do not donate the points.
             if viewer1.get_stats()['points'] < points:
                 self.send_privmsg(message.channel, f'Sorry, {message.user}, but you do not have enough {self.streamer.get_points_name()}, and I am not a liscensed {self.streamer.get_points_name()} lender.')
                 self.command_logger.warning(f'{message.user} tried to give more points than they have.')
@@ -812,14 +954,16 @@ class Bot:
     #Gambles an amount of points.
     def gamble(self, message):
         try:
+            #If the user is the streamer, the streamer loses.
             if message.user ==  self.streamer.get_username():
                 self.send_privmsg(message.channel, f'{self.streamer.username} has rolled 0. They lost all their {self.streamer.points_name}. Laugh at them.')
                 self.command_logger.info('Command user was the sttreamer. Bullying.')
                 return
             player = self.viewer_object_list[self.viewer_features_dictionary[message.user]]
             points = message.text_args[0]
-            game = game.Gamble(player, points)
-            winnings_number = game.gamble()
+            gambling = game.Gamble(player, points)
+            winnings_number = gambling.gamble()
+            #If the method fails, raise an error.
             if winnings_number == False:
                 raise ValueError('Run function returned false.')
             player.update_stat('points', 'add', winnings_number[0])
@@ -830,7 +974,7 @@ class Bot:
             self.command_logger.info(f'{message.text_command} from {message.user} failed.')
             self.send_privmsg(message.channel, f'{message.text_command} failed. Please check syntax and try again.')
 
-    #8ball game
+    #8ball game. Sends a random response from the list of responses in the 8ball.txt file.
     def eight_ball(self, message):
         file_lines = []
         with open('Chatbot\Other\Random_Texts\8ball.txt', 'r') as file:
@@ -840,7 +984,7 @@ class Bot:
         answer = file_lines[number]
         self.send_privmsg(message.channel, f'@{message.user} {answer}')
 
-    #Read jokes from file
+    #Reads a random joke from the jokes.txt file
     def read_random_joke(self, message):
         file_lines = []
         with open('Chatbot\Other\Random_Texts\jokes.txt', 'r') as file:
@@ -850,8 +994,9 @@ class Bot:
         answer = file_lines[number]
         self.send_privmsg(message.channel, f"""{answer}""")
 
-    #add joke to file
+    #Adds a joke to the jokes.txt file
     def add_joke(self, message):
+        #If the user is not the streamer, do not add the joke.
         if message.user != self.streamer.get_username():
             self.send_privmsg(f'Sorry, {message.user}, only the streamer can use this command.')
             return
@@ -862,14 +1007,14 @@ class Bot:
 
     
 
-
+#function to start the bot.
 def main():
     bot = Bot()
     bot.init_state()
     bot.init_driver()
     bot.connect()
     
-
+#Start the bot.
 if __name__ == '__main__':
     main()
 
