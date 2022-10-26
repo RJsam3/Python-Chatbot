@@ -1,8 +1,10 @@
-##Overview
+## Overview
+
 A chatbot for Twitch written in Python, created to gain experience utilizing Neo4j's Python Driver.
 
 ---
-##Features
+## Features
+
 + Templated commands that can be set both in the twitch chat and off stream, and can have almost as many arguments as the twitch chat character limit.
 + The streamer can customize which prefix they prefer for their stream.
 + Help for all non-templated commands.
