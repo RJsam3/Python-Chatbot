@@ -2,7 +2,9 @@ import sys
 import logging
 import datetime
 
+#Gets the current date for use in logging.
 date_string =  str(datetime.date.today()).replace('-','_')
+
 #define loggers
 bot_function_logger = logging.getLogger('botfunctions')
 command_logger =  logging.getLogger('commands')
