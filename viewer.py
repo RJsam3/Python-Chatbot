@@ -1,7 +1,9 @@
 import chat4j_queries
 from log import viewer_logger
 
+#Class for the Viewer object.
 class Viewer:
+    #Initialize the Viewer and all required variables.
     def __init__(self, username, streamer):
         self.QueryDriver = chat4j_queries.BotQueries()
         self.logger = viewer_logger
@@ -12,31 +14,40 @@ class Viewer:
         self.is_online = True
 
     #getters
+    #get the username.
     def get_username(self):
         return self.username
     
+    #get the stats.
     def get_stats(self):
+        #If the stats query failed, return false.
         if self.stats == False:
             return False
         else:
             return self.stats
     
+    #Gets tthe is_online boolean.
     def get_is_online(self):
         return self.is_online
 
+    #Gets the friends list.
     def get_friends_list(self):
+        #Return false if the query failed.
         if self.friends_list == False:
             return False
         else:
             return self.friends_list
 
+    #Gets the liked genres.
     def get_liked_genres(self):
+        #Return false if the query failed.
         if self.liked_genres == False:
             return False
         else:
             return self.liked_genres
 
     #updates
+    #Update is_online to the opposite value.
     def update_is_online(self):
         if self.is_online == False:
             self.is_online = True
@@ -46,6 +57,7 @@ class Viewer:
             self.is_online = False
             self.logger.info('is_online changed to False.')
 
+    #Update tthe given stat to the new value.
     def update_stat(self, stat, operator=None, value=None):
         if stat == 'query_count':
             self.QueryDriver.Run_increase_query_count(self.username)
@@ -66,6 +78,7 @@ class Viewer:
                 self.logger.error('Points can only be added or removed.')
                 return False
 
+    #Add a user to the friend list.
     def update_friends_list(self, new_friend):
         if new_friend in self.friends_list:
             self.logger.warning(f"{new_friend} is already on {self.username}'s friend list. Ignoring")
@@ -83,6 +96,7 @@ class Viewer:
                 self.logger.debug(f'Argument used: {new_friend}')
                 return False
 
+    #Add a genre to the liked genre list.
     def update_liked_genres(self, new_genre):
         if new_genre in self.liked_genres:
             self.logger.warning(f'{new_genre} is already in liked genres. Ignnoring.')
