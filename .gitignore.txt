@@ -6,3 +6,4 @@ gui_testing.py
 queue.py
 command.py
 message.py
+__pycache__/
