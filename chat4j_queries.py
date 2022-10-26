@@ -1,20 +1,20 @@
-import string
 from neo4j import GraphDatabase
 from  log import query_logger
+import config
 
+#This class handles all queries to the databse. It is divided between functions that have the queries, and functions that create trannsactions for query functions.
 class BotQueries:
     def __init__(self):
-        self.driver = GraphDatabase.driver("bolt://localhost:7687", auth=("neo4j", "p3pp3rc0rn"))
+        self.driver = GraphDatabase.driver(config.DB, auth=(config.DB_USER, config.DB_PASS))
         try:
             self.driver.verify_connectivity()
             query_logger.info("Bot Queries Driver Initialized.")
         except Exception as e:
             query_logger.critical(e)
 
-            
-    
+
     #Query functions,to be used by the run functions. They define the transaction used for the run function.
-    #Removve a user's node and all relationships.
+    #Remove a user's node and all relationships.
     def Query_remove_user(self, tx, username):
         query = ("""MATCH (p:Person) DETACH DELETE p""")
         query_logger.info(f'Running query: {query}')
@@ -58,11 +58,14 @@ class BotQueries:
         query_logger.info(f'Running query: {query}')
         try:
             results = tx.run(query, username=username)
+            #For each record in results, get the username value from that record.
             for record in results:
                 node = record["f"]
                 name = node["username"]
+                #If the name is in friends list already, pass.
                 if name in friends_list:
                     pass
+                #If the above is false, add the name to the list.
                 else:
                     friends_list.append(name)
             query_logger.info(friends_list)
@@ -79,6 +82,7 @@ class BotQueries:
         query_logger.info(f'Running query: {query}')
         try:
             results = tx.run(query)
+            #For each record in results, get the username value from that record.
             for record in results:
                 node = record['p']
                 username = node['username']
@@ -94,33 +98,36 @@ class BotQueries:
     def Query_get_stats(self, tx, username, streamer):
         stats = {}
         try:
+            #If the streamer is not the user, get the stats for the user.
             if streamer != username:
                 query_logger.info(f'{username} is not the streamer.')
                 query = ('''MATCH (p:Person)-[r:VIEWS]->(p2:Person) WHERE p.username = $username AND p2.username=$streamer RETURN p.created_on AS created, p.query_count AS count, r.points AS points''')
                 results = tx.run(query, username=username, streamer=streamer)
+                #For each record in results, get the created, count, and points values from that record.
                 for record in results:
                     stats['created_on'] = str(record['created'])
                     stats['query_count'] = record['count']
                     stats['points'] = record['points']
                 query_logger.info(stats)
                 return stats
+            #If the streamer is the user, get the stats for the streamer.
             elif streamer == username:
                 query_logger.info('{username} is the streamer.')
                 query =  ('MATCH (p:Person) WHERE p.username = $username RETURN p.created_on AS created, p.query_count as count')
                 query_logger.info(f'Running query: {query}')
                 results = tx.run(query, username=username)
+                #For each record in results, get the created, and count values from that record.
                 for record in results:
                     stats['created_on'] = str(record['created'])
                     stats['query_count'] = record['count']
                 query_logger.info(stats)
-                print(stats['created_on'])
                 return stats
         except Exception as e:
             query_logger.error(e)
             query_logger.debug(f'Argument used: {username}')
             return False
 
-    #Increase the query_count property by 1.
+    #Increase the user's query_count property by 1.
     def Query_increase_query_count(self, tx, username):
         query = ("""MATCH (p:Person {username: $username}) SET p.query_count = p.query_count + 1""")
         query_logger.info(f'Running query: {query}')
@@ -138,6 +145,7 @@ class BotQueries:
         query_logger.info(f'Running query: {query}')
         try:
             results = tx.run(query)
+            #For each record in results, get the genre value from that record.
             for record in results:
                 node=record['g']
                 genre = node['genre']
@@ -171,6 +179,7 @@ class BotQueries:
         query_logger.info(f'Running query: {query}')
         try:
             results = tx.run(query, username=username)
+            #For each record in results, get the genre value from that record and add it to tthe liked genres list.
             for record in results:
                 node = record['g']
                 genre = node['genre']
@@ -220,6 +229,7 @@ class BotQueries:
         query_logger.info(f'Running query: {query}')
         try:
             results =  tx.run(query, username=username)
+            #For each record in results, get the username value from that record.
             for record in results:
                 node = record['viewer']
                 viewer = node['username']
@@ -239,6 +249,7 @@ class BotQueries:
         query_logger.info(f'Running query: {query}')
         try:
             results = tx.run(query, username=username)
+            #For each record in results, get the genre and pathcount value from that record. Thenn add them to a dictionnary where genre is tthe key and pathcount is the value.
             for record in results:
                 genre_suggest_dict[record['genre']] = record['pathcount']
             query_logger.info(genre_suggest_dict)
@@ -257,6 +268,7 @@ class BotQueries:
         query_logger.info(f'Running query: {query}')
         try:
             results = tx.run(query, username=username)
+            #For each record in results, get the username and queries values from that record. Then add them to a dictionary with the username as the key and the quieries as the value.
             for record in results:
                 count_leader[record['username']] = record['queries']
             query_logger.info(count_leader)
@@ -275,6 +287,7 @@ class BotQueries:
         with self.driver.session() as session:
             try:
                 query = session.execute_write(self.Query_remove_user, username)
+                #If query fails, raise an error.
                 if query == False:
                     raise ValueError('Failed to execute query. Please check arguments or cypher syntax and try again.')
             except Exception as e:
@@ -290,6 +303,7 @@ class BotQueries:
         with self.driver.session() as session:
             try:
                 query = session.execute_write(self.Query_add_user, username)
+                #If query fails, raise an error.
                 if query == False:
                     raise ValueError('Failed to execute query. Please check arguments or cypher syntax and try again.')
             except Exception as e:
@@ -305,6 +319,7 @@ class BotQueries:
         with self.driver.session() as session:
             try:
                 query = session.execute_write(self.Query_add_friendship, user1,  user2)
+                #If query fails, raise an error.
                 if query == False:
                     raise ValueError('Failed to execute query. Please check arguments or cypher syntax and try again.')
             except Exception as e:
@@ -319,6 +334,7 @@ class BotQueries:
         with self.driver.session() as session:
             try:
                 friends = session.execute_read(self.Query_get_friends, username)
+                #If query fails, raise an error.
                 if friends == False:
                     raise ValueError('Failed to execute query. Please check arguments or cypher syntax and try again.')
                 else: 
@@ -335,6 +351,7 @@ class BotQueries:
         with self.driver.session() as session:
             try:
                 users = session.execute_read(self.Query_all_user)
+                #If query fails, raise an error.
                 if users == False:
                     raise ValueError('Failed to execute query. Please check arguments or cypher syntax and try again.')
                 else: 
@@ -351,6 +368,7 @@ class BotQueries:
         with self.driver.session() as session:
             try:
                 stats = session.execute_read(self.Query_get_stats, username, streamer)
+                #If query fails, raise an error.
                 if stats == False:
                     raise ValueError('Failed to execute query. Please check arguments or cypher syntax and try again.')
                 else: 
@@ -367,6 +385,7 @@ class BotQueries:
         with self.driver.session() as session:
             try:
                 query = session.execute_write(self.Query_increase_query_count, username)
+                #If query fails, raise an error.
                 if query == False:
                     raise ValueError('Failed to execute query. Please check arguments or cypher syntax and try again.')
             except Exception as e:
@@ -381,6 +400,7 @@ class BotQueries:
         with self.driver.session() as session:
             try:
                 genres = session.execute_read(self.Query_get_genres)
+                #If query fails, raise an error.
                 if genres == False:
                     raise ValueError('Failed to execute query. Please check arguments or cypher syntax and try again.')
                 return genres
@@ -396,6 +416,7 @@ class BotQueries:
         with self.driver.session() as session:
             try:
                 query = session.execute_write(self.Query_set_likes_genre, username, genre)
+                #If query fails, raise an error.
                 if query == False:
                     raise ValueError('Failed to execute query. Please check arguments or cypher syntax and try again.')
             except Exception as e:
@@ -410,6 +431,7 @@ class BotQueries:
         with self.driver.session() as session:
             try:
                 liked_genres = session.execute_read(self.Query_get_liked_genres, username)
+                #If query fails, raise an error.
                 if liked_genres == False:
                     raise ValueError('Failed to execute query. Please check arguments or cypher syntax and try again.')
                 return liked_genres
@@ -425,6 +447,7 @@ class BotQueries:
         with self.driver.session() as session:
             try:
                 query = session.execute_write(self.Query_create_user_views, username1, username2)
+                #If query fails, raise an error.
                 if query == False:
                     raise ValueError('Failed to execute query. Please check arguments or cypher syntax and try again.')
             except Exception as e:
@@ -439,6 +462,7 @@ class BotQueries:
         with self.driver.session() as session:
             try:
                 query = session.execute_write(self.Query_create_views, username1, username2)
+                #If query fails, raise an error.
                 if query == False:
                     raise ValueError('Failed to execute query. Please check arguments or cypher syntax and try again.')
             except Exception as e:
@@ -453,6 +477,7 @@ class BotQueries:
         with self.driver.session() as session:
             try:
                 viewers = session.execute_read(self.Query_viewers, username)
+                #If query fails, raise an error.
                 if viewers == False:
                     raise ValueError('Failed to execute query. Please check arguments or cypher syntax and try again.')
                 return viewers
@@ -468,6 +493,7 @@ class BotQueries:
         with self.driver.session() as session:
             try:
                 genre_suggest_dict = session.execute_read(self.Query_get_viewer_liked_genres, username)
+                #If query fails, raise an error.
                 if genre_suggest_dict == False:
                     raise ValueError('Failed to execute query. Please check arguments or cypher syntax and try again.')
                 return genre_suggest_dict
@@ -483,6 +509,7 @@ class BotQueries:
         with self.driver.session() as session:
             try:
                 count_leader = session.execute_read(self.Query_get_query_count_leader, username)
+                #If query fails, raise an error.
                 if count_leader == False:
                     raise ValueError('Failed to execute query. Please check arguments or cypher syntax and try again.')
                 return count_leader
@@ -491,14 +518,3 @@ class BotQueries:
                 query_logger.debug(f'Argument used: {username}')
             finally:
                 session.close()
-
-    
-
-#test_query = BotQueries()
-#test_query.Run_get_stats('alchematix', 'nivecgos')
-
-
-
-
-
-#test_query.driver.close()
