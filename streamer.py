@@ -1,7 +1,9 @@
 import chat4j_queries
 from log import streamer_logger
 
+#Class for the Streamer. A new instance is m ade when the bot starts.
 class Streamer():
+    #Initialize the object and all its required vairables.
     def __init__(self, username):
         self.QueryDriver = chat4j_queries.BotQueries()
         self.logger = streamer_logger
@@ -22,34 +24,44 @@ class Streamer():
         }
 
     #getters
+    #Gets the usernname.
     def get_username(self):
         return self.username
     
+    #Gets the stats.
     def get_stats(self):
+        #Return false if the query for getting stats failed.
         if self.stats == False:
             return False
         else:
             return self.stats
 
+    #Gets friends.
     def get_friends_list(self):
+        #Return false if the query for getting friends failed.
         if self.friends_list == False:
             return False
         else:
             return self.friends_list
 
+    #Get liked genres.
     def get_liked_genres(self):
+        #Return false if the query for getting liked genres failed.
         if self.liked_genres == False:
             return False
         else:
             return self.liked_genres
     
+    #Gets the command prefix.
     def get_command_prefix(self):
         return self.command_prefix
 
+    #Gets the name the stremer has decided for points.
     def get_points_name(self):
         return self.points_name
 
     #updates
+    #Updates the given stat.
     def update_stat(self, stat):
         if stat == 'query_count':
             self.QueryDriver.Run_increase_query_count(self.username)
@@ -59,6 +71,7 @@ class Streamer():
             self.logger.error('Cannot change created_on date.')
             return False
 
+    #Adds a user to the friends list.
     def update_friends_list(self, new_friend):
         if new_friend in self.friends_list:
             self.logger.warning(f"{new_friend} is already on {self.username}'s friend list. Ignoring")
@@ -76,6 +89,7 @@ class Streamer():
                 self.logger.debug(f'Argument used: {new_friend}')
                 return False
 
+    #Adds a genre to the liked genres.
     def update_liked_genres(self, new_genre):
         if new_genre in self.liked_genres:
             self.logger.warning(f'{new_genre} is already in liked genres. Ignnoring.')
@@ -86,9 +100,11 @@ class Streamer():
             self.logger.info(f"{new_genre} added to liked genres for {self.username}")
             self.liked_genres.append(new_genre)
 
+    #Sets a new command prefix.
     def set_command_prefix(self, prefix):
         self.command_prefix = prefix
     
+    #Sets a new points name.
     def set_points_name(self, name):
         self.points_name = name
 
